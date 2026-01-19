@@ -1,0 +1,65 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Broker {
+  id                     String   @id @default(uuid())
+  name                   String
+  emailHost              String
+  emailUser              String
+  emailPasswordEncrypted String
+  createdAt              DateTime @default(now())
+  emails                 Email[]
+  invoices               Invoice[]
+}
+
+model Email {
+  id        String   @id @default(uuid())
+  brokerId  String
+  broker    Broker   @relation(fields: [brokerId], references: [id])
+  from      String
+  subject   String
+  date      DateTime
+  rawBody   String?
+  messageId String   @unique
+  createdAt DateTime @default(now())
+  
+  attachments Attachment[]
+  invoices    Invoice[]
+}
+
+model Attachment {
+  id        String   @id @default(uuid())
+  emailId   String
+  email     Email    @relation(fields: [emailId], references: [id])
+  filePath  String
+  fileType  String
+  createdAt DateTime @default(now())
+}
+
+model Invoice {
+  id            String   @id @default(uuid())
+  brokerId      String
+  broker        Broker   @relation(fields: [brokerId], references: [id])
+  invoiceNumber String
+  carrier       String
+  amount        Float
+  currency      String
+  dueDate       DateTime?
+  status        String   // PAID | UNPAID
+  
+  emailId       String
+  email         Email    @relation(fields: [emailId], references: [id])
+  
+  pdfPath       String
+  extractedJson String   // Store JSON string
+  
+  createdAt     DateTime @default(now())
+
+  @@unique([brokerId, invoiceNumber])
+}
