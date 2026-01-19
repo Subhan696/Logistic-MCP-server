@@ -8,11 +8,12 @@ export const fetchEmailsSchema = z.object({
     broker_id: z.string(),
     since: z.string().optional(), // ISO date string
     subject_contains: z.string().optional(),
-    from: z.string().optional()
+    from: z.string().optional(),
+    has_attachments: z.boolean().optional()
 });
 
 export async function fetchEmailsTool(args: z.infer<typeof fetchEmailsSchema>) {
-    const { broker_id, since, subject_contains, from } = args;
+    const { broker_id, since, subject_contains, from, has_attachments } = args;
 
     // 1. Get Broker Credentials
     const broker = await prisma.broker.findUnique({ where: { id: broker_id } });
@@ -36,7 +37,8 @@ export async function fetchEmailsTool(args: z.infer<typeof fetchEmailsSchema>) {
         const emails = await imap.fetchEmails({
             since: since ? new Date(since) : undefined,
             subjectContains: subject_contains,
-            from: from
+            from: from,
+            hasAttachments: has_attachments
         });
 
         const results = [];

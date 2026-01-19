@@ -1,15 +1,12 @@
 import { ImapFlow } from 'imapflow';
 import { logger } from '../utils/logger';
-import { simpleParser } from 'mailparser'; // NOTE: I might need to install mailparser if imapflow doesn't do it all
-// simpleParser is from 'mailparser', which I haven't installed yet. imapflow assumes you use something to parse the stream usually.
-// Or I can just store raw source if I want, but I usually want to parse parsing structure.
-// Let's check dependencies I installed. imapflow.
-// I should add mailparser.
+import { simpleParser } from 'mailparser';
 
 export interface EmailSearchParams {
     since?: Date;
     subjectContains?: string;
     from?: string;
+    hasAttachments?: boolean;
 }
 
 export class ImapService {
@@ -24,7 +21,7 @@ export class ImapService {
                 user: config.user,
                 pass: config.pass
             },
-            logger: false // internal logger
+            logger: logger // Using pino logger for debug visibility
         });
     }
 
@@ -39,44 +36,42 @@ export class ImapService {
     async fetchEmails(params: EmailSearchParams) {
         const lock = await this.client.getMailboxLock('INBOX');
         try {
-            const searchCriteria: any = {};
-            if (params.since) {
-                searchCriteria.since = params.since;
-            }
-            // imapflow search is distinct. 'seq' or query.
-            // query object: { seen: false, from: '...', header: { 'subject': '...' } }
-
-            // Constructing search query
-            const query: any = {};
-            if (params.from) query.from = params.from;
-            if (params.subjectContains) query.header = { subject: params.subjectContains }; // basic approximation
-            // 'since' is top level usually? imapflow specific syntax check needed.
-            // ImapFlow 'search' method usage: client.search(query, options)
-
-            // Let's keep it simple: Fetch all recent and filter, or use basic IMAP search
-            // Filter logic might be safer in code if search support is complex
-
-            // To get message IDs and basic info first
-            // .fetch('1:*', { envelope: true })
-
-            // Wait, let's look at `fetch` command.
-
             const messages: any[] = [];
+
             // Default to last 24 hours if 'since' is not provided to strictly prevent full mailbox scans
             const fetchSince = params.since || new Date(Date.now() - 24 * 60 * 60 * 1000);
 
-            // Fetching emails (Envelope only - NO BODY/SOURCE)
-            for await (const message of this.client.fetch({ since: fetchSince }, { envelope: true, source: false, internalDate: true })) {
-                // Apply text filters here if needed
+            const fetchOptions: any = {
+                envelope: true,
+                source: false, // Do NOT download full source for listing
+                internalDate: true,
+                uid: true
+            };
+
+            // If we need to filter by attachments, we need the body structure
+            if (params.hasAttachments) {
+                fetchOptions.bodyStructure = true;
+            }
+
+            console.log(`[ImapService] Fetching emails since ${fetchSince.toISOString()}...`);
+
+            for await (const message of this.client.fetch({ since: fetchSince }, fetchOptions)) {
                 if (!message.envelope) continue;
+
+                // Filters
                 if (params.subjectContains && !message.envelope.subject?.includes(params.subjectContains)) continue;
                 if (params.from && (!message.envelope.from || !message.envelope.from.some((addr: any) => addr.address?.includes(params.from)))) continue;
+
+                // Attachment Filter
+                if (params.hasAttachments) {
+                    const hasAtt = this.checkForAttachments(message.bodyStructure);
+                    if (!hasAtt) continue;
+                }
 
                 messages.push({
                     uid: message.uid,
                     seq: message.seq,
                     envelope: message.envelope,
-                    // source: message.source, // Removed to improve performance
                     id: message.envelope.messageId,
                     date: message.internalDate
                 });
@@ -87,31 +82,55 @@ export class ImapService {
         }
     }
 
-    async fetchAttachments(messageId: string): Promise<{ filename: string, content: Buffer }[]> {
-        const lock = await this.client.getMailboxLock('INBOX');
-        try {
-            // Fetch specific message by Message-ID
-            // Note: Message-ID usually has angle brackets <...> in IMAP search if strict, usually stripped in DB? 
-            // Let's assume input has them or we handle robustly.
-            // Usually Message-ID in DB is clean. IMAP search for Header Message-ID should match.
+    private checkForAttachments(structure: any): boolean {
+        if (!structure) return false;
 
-            const messageGenerator = this.client.fetch({ header: { 'message-id': messageId } }, { source: true });
+        // Recursive check
+        const check = (part: any): boolean => {
+            if (part.disposition === 'attachment' || part.dispositionParameters?.filename || (part.parameters && part.parameters.name)) {
+                return true;
+            }
+            if (part.childNodes) {
+                return part.childNodes.some(check);
+            }
+            return false;
+        };
+
+        return check(structure);
+    }
+
+    async fetchAttachments(messageId: string): Promise<{ filename: string, content: Buffer }[]> {
+        console.log(`[ImapService] Fetching attachments for ${messageId}...`);
+
+        // We use mailboxOpen instead of lock for potentially better concurrency/less deadlocking
+        await this.client.mailboxOpen('INBOX');
+
+        try {
+            // Fetch specific message by Message-ID. 
+            // We fetch the FULL source here and use simpleParser because it is more robust than manual bodyStructure parsing
+            // when dealing with complex MIME types, despite being heavier on bandwidth.
+            const messageGenerator = this.client.fetch({ header: { 'message-id': messageId } }, { source: true, uid: true });
 
             for await (const message of messageGenerator) {
                 if (message.source) {
+                    console.log(`[ImapService] Source fetched (${message.source.length} bytes). Parsing...`);
                     const parsed = await simpleParser(message.source);
-                    return parsed.attachments.map(att => ({
-                        filename: att.filename || 'untitled.pdf',
-                        content: att.content
-                    }));
+
+                    if (parsed.attachments && parsed.attachments.length > 0) {
+                        console.log(`[ImapService] Parsed. Found ${parsed.attachments.length} attachments.`);
+                        return parsed.attachments.map(att => ({
+                            filename: att.filename || 'untitled.pdf',
+                            content: att.content
+                        }));
+                    } else {
+                        console.log('[ImapService] Parsed but NO attachments found.');
+                    }
                 }
             }
             return [];
         } catch (e) {
             logger.error('Failed to fetch attachments', e);
-            return [];
-        } finally {
-            lock.release();
+            throw e;
         }
     }
 }

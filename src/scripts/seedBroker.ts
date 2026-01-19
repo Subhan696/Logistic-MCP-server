@@ -11,9 +11,9 @@ async function main() {
 
     const REAL_CONFIG = {
         name: 'My Real Email',
-        emailHost: 'imap.gmail.com',  // Customise this: imap.gmail.com, outlook.office365.com, etc.
-        emailUser: 'subhankashif696@gmail.com', // <--- PUT YOUR EMAIL HERE
-        emailPassword: 'tlpb vngj xjpq nrex' // <--- PUT YOUR APP PASSWORD HERE
+        emailHost: 'imap.gmail.com',
+        emailUser: process.env.TEST_EMAIL_USER || 'YOUR_EMAIL@gmail.com',
+        emailPassword: process.env.TEST_EMAIL_PASSWORD || 'YOUR_APP_PASSWORD'
     };
 
     if (REAL_CONFIG.emailUser.includes('YOUR_EMAIL')) {
