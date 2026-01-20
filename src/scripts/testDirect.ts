@@ -1,6 +1,9 @@
 import { prisma } from '../db/prismaClient';
 import { fetchEmailsTool } from '../tools/fetchEmails';
 import { downloadAttachmentsTool } from '../tools/downloadAttachments';
+import { parseInvoicePdfTool } from '../tools/parseInvoicePdf';
+import { storeInvoiceTool } from '../tools/storeInvoice';
+import { queryInvoicesTool } from '../tools/queryInvoices';
 
 async function main() {
     // 1. Get the specific broker
@@ -48,8 +51,55 @@ async function main() {
             const dlDuration = (Date.now() - dlStart) / 1000;
             console.log(`✅ Download Success in ${dlDuration}s`);
             console.log(dlResult);
+
+            // 4. Test Parse Invoice PDF (if we got a file)
+            if (dlResult.files && dlResult.files.length > 0) {
+                const pdfPath = dlResult.files[0];
+                console.log(`\nTesting parseInvoicePdfTool for: ${pdfPath}...`);
+
+                // We need to implement this part, but it might fail if LLM is not configured or file isn't an invoice
+                // For safety, we wrap in try/catch to continue testing
+                let invoiceData;
+                try {
+                    invoiceData = await parseInvoicePdfTool({
+                        pdf_path: pdfPath
+                    });
+                    console.log('✅ Parse Success:');
+                    console.log(invoiceData);
+                } catch (parseErr) {
+                    console.error('⚠️ Parse failed (expected if AI not set up or PDF not invoice):', parseErr);
+                }
+
+                // 5. Test Store Invoice (only if parse succeeded)
+                if (invoiceData) {
+                    console.log(`\nTesting storeInvoiceTool...`);
+                    const storeResult = await storeInvoiceTool({
+                        broker_id: broker.id,
+                        email_id: emailId,
+                        pdf_path: pdfPath,
+                        invoice_data: {
+                            invoice_number: invoiceData.invoice_number || `TEST-${Date.now()}`, // Fallback for testing
+                            carrier: invoiceData.carrier || "Test Carrier",
+                            amount: invoiceData.amount || 100.00,
+                            currency: invoiceData.currency || "USD",
+                            due_date: invoiceData.due_date,
+                            load_id: invoiceData.load_id
+                        }
+                    });
+                    console.log('✅ Store Success:', storeResult);
+                }
+
+                // 6. Test Query Invoices
+                console.log(`\nTesting queryInvoicesTool...`);
+                const invoices = await queryInvoicesTool({
+                    broker_id: broker.id
+                });
+                console.log(`✅ Query Success. Found ${invoices.length} invoices.`);
+                if (invoices.length > 0) console.log(invoices[0]);
+            }
+
         } else {
-            console.log('No emails found to test attachment download.');
+            console.log('No emails found to test attachment download chain.');
         }
 
     } catch (error) {

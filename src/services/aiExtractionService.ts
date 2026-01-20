@@ -15,13 +15,14 @@ const SCHEMA_PROMPT = `
 Extract the following fields from the invoice text and return ONLY valid JSON:
 {
   "invoice_number": "string",
-  "carrier": "string",
+  "carrier": "string (Carrier Name OR Store/Merchant Name)",
   "amount": number,
-  "currency": "string (USD, CAD, etc)",
+  "currency": "string (USD, CAD, etc defaults to USD)",
   "due_date": "YYYY-MM-DD" or null,
   "load_id": "string" or null
 }
 If a field is not found, use null.
+If you see a Store Name (e.g. Walmart, Target) instead of a Logistics Carrier, use that as the "carrier".
 `;
 
 export class AiExtractionService {
