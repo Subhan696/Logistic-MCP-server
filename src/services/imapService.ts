@@ -30,7 +30,16 @@ export class ImapService {
     }
 
     async disconnect() {
-        await this.client.logout();
+        // Try to logout gracefully with a timeout
+        try {
+            const logoutPromise = this.client.logout();
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Logout timed out')), 2000));
+            await Promise.race([logoutPromise, timeoutPromise]);
+        } catch (e) {
+            // If logout fails or times out, force close
+            logger.warn('IMAP logout failed or timed out, forcing close', e);
+            this.client.close();
+        }
     }
 
     async fetchEmails(params: EmailSearchParams) {
@@ -45,13 +54,9 @@ export class ImapService {
                 envelope: true,
                 source: false, // Do NOT download full source for listing
                 internalDate: true,
-                uid: true
+                uid: true,
+                bodyStructure: params.hasAttachments // Fetch bodyStructure early if needed
             };
-
-            // If we need to filter by attachments, we need the body structure
-            if (params.hasAttachments) {
-                fetchOptions.bodyStructure = true;
-            }
 
             console.log(`[ImapService] Fetching emails since ${fetchSince.toISOString()}...`);
 
@@ -102,8 +107,8 @@ export class ImapService {
     async fetchAttachments(messageId: string): Promise<{ filename: string, content: Buffer }[]> {
         console.log(`[ImapService] Fetching attachments for ${messageId}...`);
 
-        // We use mailboxOpen instead of lock for potentially better concurrency/less deadlocking
-        await this.client.mailboxOpen('INBOX');
+        // Use lock to ensure clean state and release
+        const lock = await this.client.getMailboxLock('INBOX');
 
         try {
             // Fetch specific message by Message-ID. 
@@ -131,6 +136,8 @@ export class ImapService {
         } catch (e) {
             logger.error('Failed to fetch attachments', e);
             throw e;
+        } finally {
+            lock.release();
         }
     }
 }

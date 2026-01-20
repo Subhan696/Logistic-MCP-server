@@ -5,6 +5,7 @@ import { ImapService } from '../services/imapService';
 import { storageService } from '../services/storageService';
 import { logger } from '../utils/logger';
 import path from 'path';
+import fs from 'fs';
 
 export const downloadAttachmentsSchema = z.object({
     email_id: z.string()
@@ -22,14 +23,24 @@ export async function downloadAttachmentsTool(args: z.infer<typeof downloadAttac
         throw new Error(`Email not found: ${email_id}`);
     }
 
-    // Check if attachments already exist in DB?
+    // Check if attachments already exist in DB AND on disk
     const existingAttachments = await prisma.attachment.findMany({ where: { emailId: email.id } });
+
     if (existingAttachments.length > 0) {
-        logger.info(`Attachments already downloaded for email ${email_id}`);
-        return {
-            message: 'Attachments already downloaded',
-            files: existingAttachments.map(a => a.filePath)
-        };
+        const validFiles = existingAttachments.filter(a => fs.existsSync(a.filePath));
+
+        if (validFiles.length === existingAttachments.length) {
+            logger.info(`Attachments already downloaded for email ${email_id}`);
+            return {
+                message: 'Attachments already downloaded',
+                files: validFiles.map(a => a.filePath)
+            };
+        }
+
+        // If some files are missing, we should probably re-download everything to be safe,
+        // or just proceed to download loop which handles it. 
+        // For simplicity, if any are missing, we assume we need to re-fetch.
+        logger.warn(`Some attachments missing on disk for ${email_id}. Re-downloading...`);
     }
 
     const password = decrypt(email.broker.emailPasswordEncrypted);

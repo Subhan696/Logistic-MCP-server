@@ -44,11 +44,28 @@ export class AiExtractionService {
         if (!key) throw new Error('GEMINI_API_KEY not set');
 
         const genAI = new GoogleGenerativeAI(key);
-        const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+        const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
 
-        const result = await model.generateContent(`${SCHEMA_PROMPT}\n\nINVOICE TEXT:\n${text}`);
-        const r = result.response.text();
-        return this.parseJson(r);
+        const maxRetries = 3;
+        let attempt = 0;
+
+        while (attempt < maxRetries) {
+            try {
+                const result = await model.generateContent(`${SCHEMA_PROMPT}\n\nINVOICE TEXT:\n${text}`);
+                const r = result.response.text();
+                return this.parseJson(r);
+            } catch (error: any) {
+                if (error.message?.includes('429') || error.status === 429 ||
+                    error.message?.includes('503') || error.status === 503) {
+                    attempt++;
+                    console.log(`⚠️ Gemini Service Error (${error.status || 'limit/overload'}). Waiting 60s before retry ${attempt}/${maxRetries}...`);
+                    await new Promise(resolve => setTimeout(resolve, 60000));
+                } else {
+                    throw error;
+                }
+            }
+        }
+        throw new Error('Gemini API Rate Limit Exceeded after retries');
     }
 
     private async extractOpenAI(text: string): Promise<InvoiceData> {

@@ -25,6 +25,7 @@
         "dotenv": "^16.0.0",
         "imapflow": "^1.0.124",
         "mailparser": "^3.9.1",
+        "nodemailer": "^7.0.12",
         "openai": "^6.16.0",
         "pdf-parse": "^1.1.1",
         "pino": "^8.0.0",
@@ -35,6 +36,7 @@
     "devDependencies": {
         "@types/mailparser": "^3.4.6",
         "@types/node": "^18.0.0",
+        "@types/nodemailer": "^7.0.5",
         "@types/pdf-parse": "^1.1.0",
         "cross-env": "^10.1.0",
         "nodemon": "^3.0.0",
