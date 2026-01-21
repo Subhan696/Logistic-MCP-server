@@ -21,7 +21,12 @@ export class ImapService {
                 user: config.user,
                 pass: config.pass
             },
-            logger: logger // Using pino logger for debug visibility
+            logger: false as any // Explicitly disable logging. Cast to any to avoid TS issues if strict types complain
+        });
+
+        // Prevent crash on unhandled error events
+        this.client.on('error', (err) => {
+            logger.error('IMAP Client Error', err);
         });
     }
 

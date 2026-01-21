@@ -31,9 +31,10 @@ export async function downloadAttachmentsTool(args: z.infer<typeof downloadAttac
 
         if (validFiles.length === existingAttachments.length) {
             logger.info(`Attachments already downloaded for email ${email_id}`);
+            const distinctFiles = [...new Set(validFiles.map(a => a.filePath))];
             return {
                 message: 'Attachments already downloaded',
-                files: validFiles.map(a => a.filePath)
+                files: distinctFiles
             };
         }
 
