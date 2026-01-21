@@ -68,13 +68,23 @@ export async function downloadAttachmentsTool(args: z.infer<typeof downloadAttac
             const filePath = await storageService.saveFile('invoices', safeFilename, att.content); // Saving to invoices dir? Or attachments?
             // User says "Save to /storage/invoices". OK.
 
-            await prisma.attachment.create({
-                data: {
+            // Check if attachment record exists first to prevent duplicates
+            const existing = await prisma.attachment.findFirst({
+                where: {
                     emailId: email.id,
-                    filePath: filePath,
-                    fileType: path.extname(att.filename) || 'unknown'
+                    filePath: filePath
                 }
             });
+
+            if (!existing) {
+                await prisma.attachment.create({
+                    data: {
+                        emailId: email.id,
+                        filePath: filePath,
+                        fileType: path.extname(att.filename) || 'unknown'
+                    }
+                });
+            }
 
             savedFiles.push(filePath);
         }

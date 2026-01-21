@@ -35,6 +35,8 @@ export class AiExtractionService {
     async extractInvoiceData(text: string): Promise<InvoiceData> {
         if (this.provider === 'openai') {
             return this.extractOpenAI(text);
+        } else if (this.provider === 'ollama') {
+            return this.extractOllama(text);
         }
         return this.extractGemini(text);
     }
@@ -43,29 +45,61 @@ export class AiExtractionService {
         const key = process.env.GEMINI_API_KEY;
         if (!key) throw new Error('GEMINI_API_KEY not set');
 
-        const genAI = new GoogleGenerativeAI(key);
-        const model = genAI.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+        // Models to rotate through (Based on user's available plan)
+        const GEMINI_MODELS = [
+            'gemini-2.5-flash-lite', // 10 RPM (Highest)
+            'gemini-2.5-flash',      // 5 RPM
+            'gemini-3-flash-preview' // 5 RPM
+        ];
 
-        const maxRetries = 3;
-        let attempt = 0;
+        let modelIndex = 0;
+        const maxTotalRetries = 15; // Allow several full cycles
+        let totalAttempts = 0;
 
-        while (attempt < maxRetries) {
+        while (totalAttempts < maxTotalRetries) {
+            const currentModelName = GEMINI_MODELS[modelIndex];
+
             try {
+                // console.log(`  Trying model: ${currentModelName}...`); 
+                const genAI = new GoogleGenerativeAI(key);
+                const model = genAI.getGenerativeModel({ model: currentModelName });
+
                 const result = await model.generateContent(`${SCHEMA_PROMPT}\n\nINVOICE TEXT:\n${text}`);
                 const r = result.response.text();
                 return this.parseJson(r);
+
             } catch (error: any) {
-                if (error.message?.includes('429') || error.status === 429 ||
-                    error.message?.includes('503') || error.status === 503) {
-                    attempt++;
-                    console.log(`⚠️ Gemini Service Error (${error.status || 'limit/overload'}). Waiting 60s before retry ${attempt}/${maxRetries}...`);
-                    await new Promise(resolve => setTimeout(resolve, 60000));
+                // Retry on rate limits (429), overloaded (503), OR if model not found/supported (404)
+                // If 404, we definitely want to try the next model in the list.
+                const isRetryable = error.message?.includes('429') || error.status === 429 ||
+                    error.message?.includes('503') || error.status === 503 ||
+                    error.message?.includes('404') || error.status === 404;
+
+                if (isRetryable) {
+                    // Log the failure
+                    console.log(`  ⚠️ Model ${currentModelName} failed (${error.status || error.message}).`);
+
+                    // Move to next model
+                    modelIndex = (modelIndex + 1) % GEMINI_MODELS.length;
+                    totalAttempts++;
+
+                    // If we cycled through all models and they all failed, wait a bit longer
+                    if (totalAttempts % GEMINI_MODELS.length === 0) {
+                        const waitTime = 10000; // 10s wait if all models are busy/broken
+                        console.log(`  All models failed/busy. Waiting ${waitTime / 1000}s before restarting cycle...`);
+                        await new Promise(resolve => setTimeout(resolve, waitTime));
+                    } else {
+                        // Short pause between model switches
+                        const shortWait = 1000;
+                        console.log(`  Switching to ${GEMINI_MODELS[modelIndex]} in ${shortWait / 1000}s...`);
+                        await new Promise(resolve => setTimeout(resolve, shortWait));
+                    }
                 } else {
-                    throw error;
+                    throw error; // Throw only if it's a completely unknown error (e.g. auth failure 401, or malformed request 400)
                 }
             }
         }
-        throw new Error('Gemini API Rate Limit Exceeded after retries');
+        throw new Error('Gemini API Rate Limit Exceeded after exhausting all models and retries');
     }
 
     private async extractOpenAI(text: string): Promise<InvoiceData> {
@@ -85,6 +119,40 @@ export class AiExtractionService {
         const r = completion.choices[0].message.content;
         if (!r) throw new Error('Empty response from OpenAI');
         return this.parseJson(r);
+    }
+
+    private async extractOllama(text: string): Promise<InvoiceData> {
+        const model = process.env.OLLAMA_MODEL || 'llama3';
+        const baseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
+
+        try {
+            const response = await fetch(`${baseUrl}/api/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    model: model,
+                    messages: [
+                        { role: 'system', content: SCHEMA_PROMPT },
+                        { role: 'user', content: text }
+                    ],
+                    stream: false,
+                    format: 'json'
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error(`Ollama API error: ${response.status} ${response.statusText}`);
+            }
+
+            const data = await response.json() as any;
+            const r = data.message?.content;
+
+            if (!r) throw new Error('Empty response from Ollama');
+            return this.parseJson(r);
+        } catch (error: any) {
+            logger.error('Ollama extraction failed', { error: error.message });
+            throw error;
+        }
     }
 
     private parseJson(input: string): InvoiceData {

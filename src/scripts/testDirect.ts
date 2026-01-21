@@ -37,11 +37,9 @@ async function main() {
         console.log(`✅ Fetch Success in ${duration}s`);
         console.log(`Found ${result.count} emails.`);
 
-        // Process up to 5 emails to avoid excessive API usage during testing
-        const emailsToProcess = result.emails.slice(0, 5);
-        if (result.emails.length > 5) {
-            console.log(`⚠️ Limit: Processing only first 5 of ${result.emails.length} emails.`);
-        }
+        // Process all emails
+        const emailsToProcess = result.emails;
+        console.log(`Processing all ${result.emails.length} emails...`);
 
         if (emailsToProcess.length > 0) {
             for (const email of emailsToProcess) {

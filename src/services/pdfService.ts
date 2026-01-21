@@ -22,17 +22,32 @@ export class PdfService {
         }
 
         // 2. Fallback to OCR
-        return await this.ocrExtract(filePath);
+        // OCR is currently causing hard crashes in worker threads. Disabling for stability.
+        logger.warn('PDF text sparse but OCR disabled due to stability issues.');
+        return "";
+        // return await this.ocrExtract(filePath);
     }
 
     private async ocrExtract(filePath: string): Promise<string> {
-        logger.info('Starting OCR...');
-        // @ts-ignore
-        const worker = await createWorker('eng');
-        const { data: { text } } = await worker.recognize(filePath);
-        await worker.terminate();
-        logger.info(`OCR completed (${text.length} chars)`);
-        return text;
+        try {
+            logger.info('Starting OCR...');
+            // Tesseract v5 API: createWorker(langs, oem, options)
+            // But types might be tricky. Let's force it or use the long form.
+            // Disable TS check for this call as types are conflicting
+            const worker = await createWorker('eng' as any);
+
+            const ret = await worker.recognize(filePath);
+            const text = ret.data.text;
+
+            await worker.terminate();
+
+            logger.info(`OCR completed (${text.length} chars)`);
+            return text;
+        } catch (error) {
+            logger.error('OCR failed/crashed:', error);
+            // Return empty string instead of crashing the whole process
+            return "";
+        }
     }
 }
 
