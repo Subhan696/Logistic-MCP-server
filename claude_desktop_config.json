@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "logistics-invoice": {
+      "command": "node",
+      "args": [
+        "d:\\projects\\MCP\\logistics\\dist\\server.js"
+      ],
+      "env": {
+        "DATABASE_URL": "postgresql://postgres:password@localhost:5432/logistics?schema=public",
+        "AI_PROVIDER": "ollama",
+        "OLLAMA_MODEL": "llama3.2",
+        "OLLAMA_BASE_URL": "http://localhost:11434",
+        "ENCRYPTION_KEY": "your-secret-key-min-32-chars",
+        "LOG_LEVEL": "info"
+      }
+    }
+  }
+}

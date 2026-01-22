@@ -1,12 +1,20 @@
 import pino from 'pino';
-import pretty from 'pino-pretty';
+import fs from 'fs';
+import path from 'path';
 
-const stream = pretty({
-    colorize: true,
-    ignore: 'pid,hostname',
-    translateTime: 'SYS:standard'
-});
+// Write logs to stderr (not stdout) to avoid interfering with MCP stdio transport
+// MCP uses stdout for JSON-RPC messages only
+const logFile = path.join(__dirname, '../../logs/server.log');
+const logDir = path.dirname(logFile);
+
+// Ensure log directory exists
+if (!fs.existsSync(logDir)) {
+    fs.mkdirSync(logDir, { recursive: true });
+}
 
 export const logger = pino({
     level: process.env.LOG_LEVEL || 'info',
-}, stream);
+}, pino.destination({
+    dest: logFile,
+    sync: false
+}));
