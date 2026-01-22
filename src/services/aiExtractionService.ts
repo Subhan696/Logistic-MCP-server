@@ -26,19 +26,80 @@ If you see a Store Name (e.g. Walmart, Target) instead of a Logistics Carrier, u
 `;
 
 export class AiExtractionService {
-    private provider: string;
+    private defaultProvider: string;
 
     constructor() {
-        this.provider = process.env.AI_PROVIDER || 'gemini';
+        this.defaultProvider = process.env.AI_PROVIDER || 'gemini';
     }
 
-    async extractInvoiceData(text: string): Promise<InvoiceData> {
-        if (this.provider === 'openai') {
-            return this.extractOpenAI(text);
-        } else if (this.provider === 'ollama') {
-            return this.extractOllama(text);
+    /**
+     * Check which providers are available (have API keys/connectivity)
+     */
+    private checkAvailableProviders(): string[] {
+        const available: string[] = [];
+        
+        if (process.env.OLLAMA_BASE_URL) {
+            available.push('ollama'); // Ollama doesn't need API key
         }
-        return this.extractGemini(text);
+        if (process.env.GEMINI_API_KEY) {
+            available.push('gemini');
+        }
+        if (process.env.OPENAI_API_KEY) {
+            available.push('openai');
+        }
+        
+        return available;
+    }
+
+    /**
+     * Get fallback providers in order of preference
+     */
+    private getFallbackChain(requestedProvider?: string): string[] {
+        const requested = requestedProvider || this.defaultProvider;
+        const available = this.checkAvailableProviders();
+        
+        if (available.length === 0) {
+            throw new Error('No AI providers configured. Set GEMINI_API_KEY, OPENAI_API_KEY, or OLLAMA_BASE_URL');
+        }
+
+        // If requested provider is available, use it
+        if (available.includes(requested)) {
+            return [requested, ...available.filter(p => p !== requested)];
+        }
+
+        // Otherwise, use available providers in order
+        logger.warn(`Requested provider '${requested}' not available. Using fallback chain: ${available.join(' → ')}`);
+        return available;
+    }
+
+    async extractInvoiceData(text: string, provider?: string): Promise<InvoiceData> {
+        const fallbackChain = this.getFallbackChain(provider);
+        const errors: { provider: string; error: string }[] = [];
+
+        for (const activeProvider of fallbackChain) {
+            try {
+                logger.info(`Attempting extraction with ${activeProvider}...`);
+                
+                if (activeProvider === 'openai') {
+                    return await this.extractOpenAI(text);
+                } else if (activeProvider === 'ollama') {
+                    return await this.extractOllama(text);
+                } else {
+                    return await this.extractGemini(text);
+                }
+            } catch (error: any) {
+                const errorMsg = error.message || String(error);
+                logger.warn(`${activeProvider} failed: ${errorMsg}`);
+                errors.push({ provider: activeProvider, error: errorMsg });
+                
+                // Try next provider
+                continue;
+            }
+        }
+
+        // All providers failed
+        const errorSummary = errors.map(e => `${e.provider}: ${e.error}`).join(' | ');
+        throw new Error(`All AI providers failed. Tried: ${errorSummary}`);
     }
 
     private async extractGemini(text: string): Promise<InvoiceData> {
